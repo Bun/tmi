@@ -14,14 +14,17 @@ import (
 // DefaultServer is the default Twitch "IRC" server used by e.g. web chat
 const DefaultServer = "wss://irc-ws.chat.twitch.tv/"
 
+// Message aliases irc.Message for import convenience.
 type Message = irc.Message
 
+// A Handler receives events from IRCon.
 type Handler interface {
 	Connected()
 	Disconnected(err error)
 	Message(*irc.Message)
 }
 
+// An IRCon is an automatically reconnecting IRC connection.
 type IRCon struct {
 	server       string
 	nick, passwd string
@@ -33,6 +36,7 @@ type IRCon struct {
 	Handler Handler
 }
 
+// New creates a new IRCon with the given credentials.
 func New(nick, passwd string) *IRCon {
 	return &IRCon{
 		nick:   nick,
@@ -40,6 +44,7 @@ func New(nick, passwd string) *IRCon {
 	}
 }
 
+// Background runs the connection in a background goroutine until ctx is done.
 func (i *IRCon) Background(ctx context.Context) {
 	i.ctx = ctx
 	go i.loop()
@@ -56,7 +61,7 @@ func (i *IRCon) loop() {
 			return
 		case <-delay:
 		}
-		delay = time.After(time.Second * 5)
+		delay = time.After(time.Second * 30)
 		wait := i.establish()
 		if wait != nil {
 			select {
@@ -69,7 +74,7 @@ func (i *IRCon) loop() {
 	}
 }
 
-func (i *IRCon) establish() chan int {
+func (i *IRCon) establish() chan struct{} {
 	server := i.server
 	if server == "" {
 		server = DefaultServer
@@ -92,13 +97,15 @@ func (i *IRCon) establish() chan int {
 	con.Send(fmt.Sprint("PASS ", passwd))
 	con.Send(fmt.Sprint("NICK ", nick))
 	con.Send(fmt.Sprint("USER ", nick, " 8 * :", nick))
-	wait := make(chan int)
+	wait := make(chan struct{})
 	i.mu.Lock()
 	i.con = con
 	i.mu.Unlock()
 	i.Handler.Connected()
 	go func() {
-		defer i.Handler.Disconnected(con.Err()) // TODO: validate order of events
+		defer func() {
+			i.Handler.Disconnected(con.Err()) // TODO: validate order of events
+		}()
 		defer close(wait)
 		defer con.Close()
 		i.dispatch(con, msgs)
@@ -110,7 +117,7 @@ func (i *IRCon) dispatch(con *irc.IRC, msgs chan *irc.Message) {
 	for msg := range msgs {
 		switch msg.Command {
 		case "PING":
-			con.Sendf("PONG :%v", msg.Trailer(0))
+			con.Send(fmt.Sprint("PONG :", msg.Trailer(0)))
 		}
 		// Call should not block
 		// Call should implement error handling
@@ -118,6 +125,8 @@ func (i *IRCon) dispatch(con *irc.IRC, msgs chan *irc.Message) {
 	}
 }
 
+// Send sends a message to the currently active IRC connection. If there is no
+// active connection, the message is lost.
 func (i *IRCon) Send(s string) {
 	i.mu.Lock()
 	defer i.mu.Unlock()

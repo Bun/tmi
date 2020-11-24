@@ -4,7 +4,6 @@ package irc
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -12,8 +11,12 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+// deadline is used to set a maximum read/write timeout. This shouldn't be
+// violated on a working connection, due to in-protocol PING/PONG and normal
+// activity.
 const deadline = 5 * 60 * time.Second
 
+// IRC is an IRC connection.
 type IRC struct {
 	ctx context.Context
 
@@ -30,7 +33,7 @@ type IRC struct {
 func New(ctx context.Context) *IRC {
 	return &IRC{
 		ctx:      ctx,
-		Outgoing: make(chan string, 32),
+		Outgoing: make(chan string, 4),
 	}
 }
 
@@ -59,6 +62,8 @@ func (irc *IRC) Err() error {
 }
 
 func (irc *IRC) sender() {
+	// TODO: while nice to have, Replacer has some interesting memory
+	// allocation behavior.
 	guard := strings.NewReplacer("\x00", " ", "\r", " ", "\n", " ")
 	og := irc.Outgoing
 
@@ -72,7 +77,6 @@ func (irc *IRC) sender() {
 		message = guard.Replace(message)
 		irc.con.SetWriteDeadline(time.Now().Add(deadline))
 		err := irc.con.WriteMessage(websocket.TextMessage, []byte(message+"\r\n"))
-
 		if err != nil {
 			irc.closeWithErr(err)
 			break
@@ -86,7 +90,7 @@ func (irc *IRC) sender() {
 }
 
 func (irc *IRC) reader() chan *Message {
-	incoming := make(chan *Message, 32)
+	incoming := make(chan *Message, 4)
 	go func() {
 		defer close(incoming)
 		for {
@@ -113,37 +117,11 @@ func (irc *IRC) reader() chan *Message {
 	return incoming
 }
 
-// CTCPCommand sends a CTCP command.
-func (irc *IRC) CTCPCommand(target, command string, args ...string) {
-	if len(args) == 0 {
-		irc.Sendf("PRIVMSG %s :\x01%s\x01", target, command)
-	} else {
-		irc.Sendf("PRIVMSG %s :\x01%s %s\x01", target, command,
-			strings.Join(args, " "))
-	}
-}
-
-// CTCPReply sends a CTCP reply.
-func (irc *IRC) CTCPReply(target, command string, args ...string) {
-	if len(args) == 0 {
-		irc.Sendf("NOTICE %s :\x01%s\x01", target, command)
-	} else {
-		irc.Sendf("NOTICE %s :\x01%s %s\x01", target, command,
-			strings.Join(args, " "))
-	}
-}
-
 // Send queues a message to be sent to the IRC server, blocking if the queue is
 // full.
 func (irc *IRC) Send(message string) {
 	// TODO: ensure this does not block forever on error-close
 	irc.Outgoing <- message
-}
-
-// Sendf is a convenience function that uses Send to send a formatted string to
-// the IRC server.
-func (irc *IRC) Sendf(format string, args ...interface{}) {
-	irc.Send(fmt.Sprintf(format, args...))
 }
 
 func (irc *IRC) closeWithErr(err error) {

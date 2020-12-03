@@ -19,9 +19,20 @@ type handler struct {
 
 func (h *handler) Connected() {
 	fmt.Println("#", time.Now(), "Connected")
-	for _, c := range h.Channels {
-		h.Con.Send("JOIN " + c)
-	}
+	// 50/15
+	go func() {
+		N := 50
+		for i := 0; i < len(h.Channels); i += N {
+			end := i + N
+			if end > len(h.Channels) {
+				end = len(h.Channels)
+			}
+			clist := strings.Join(h.Channels[i:end], ",")
+			fmt.Println("# Join:", clist)
+			h.Con.Send("JOIN " + clist)
+			time.Sleep(time.Second * 16)
+		}
+	}()
 }
 
 func (handler) Disconnected(err error) {
@@ -43,7 +54,11 @@ func main() {
 		Con: con,
 	}
 	if channel != "" {
-		h.Channels = []string{addPrefix(channel, "#")}
+		chans := strings.Split(channel, ",")
+		for i, cname := range chans {
+			chans[i] = addPrefix(cname, "#")
+		}
+		h.Channels = chans
 	}
 	con.Handler = h
 	con.Background(ctx)

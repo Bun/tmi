@@ -3,7 +3,6 @@ package ircon
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -13,6 +12,11 @@ import (
 
 // DefaultServer is the default Twitch "IRC" server used by e.g. web chat
 const DefaultServer = "wss://irc-ws.chat.twitch.tv/"
+
+// DefaultCaps is the default set of capabilities. The twitch.tv/membership
+// capability is omitted for performance reasons and its general lack of
+// usefulness in most scenarios.
+const DefaultCaps = "twitch.tv/tags twitch.tv/commands"
 
 // Message aliases irc.Message for import convenience.
 type Message = irc.Message
@@ -26,6 +30,10 @@ type Handler interface {
 
 // An IRCon is an automatically reconnecting IRC connection.
 type IRCon struct {
+	// Caps contains the set of capabilities that are requested on connect.
+	// Advanced users can specify their own set.
+	Caps string
+
 	server       string
 	nick, passwd string
 
@@ -39,6 +47,7 @@ type IRCon struct {
 // New creates a new IRCon with the given credentials.
 func New(nick, passwd string) *IRCon {
 	return &IRCon{
+		Caps:   DefaultCaps,
 		nick:   nick,
 		passwd: passwd,
 	}
@@ -93,10 +102,12 @@ func (i *IRCon) establish() chan struct{} {
 		nick = "justinfan12345"
 		passwd = "blah"
 	}
-	con.Send("CAP REQ :twitch.tv/tags twitch.tv/membership twitch.tv/commands")
-	con.Send(fmt.Sprint("PASS ", passwd))
-	con.Send(fmt.Sprint("NICK ", nick))
-	con.Send(fmt.Sprint("USER ", nick, " 8 * :", nick))
+	if i.Caps != "" {
+		con.Send("CAP REQ :" + i.Caps)
+	}
+	con.Send("PASS " + passwd)
+	con.Send("NICK " + nick)
+	con.Send("USER " + nick + " 8 * :" + nick)
 	wait := make(chan struct{})
 	i.mu.Lock()
 	i.con = con
@@ -117,7 +128,7 @@ func (i *IRCon) dispatch(con *irc.IRC, msgs chan *irc.Message) {
 	for msg := range msgs {
 		switch msg.Command {
 		case "PING":
-			con.Send(fmt.Sprint("PONG :", msg.Trailer(0)))
+			con.Send("PONG :" + msg.Trailer(0))
 		}
 		// Call should not block
 		// Call should implement error handling

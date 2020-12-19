@@ -3,7 +3,6 @@ package ircon
 
 import (
 	"context"
-	"log"
 	"sync"
 	"time"
 
@@ -23,8 +22,17 @@ type Message = irc.Message
 
 // A Handler receives events from IRCon.
 type Handler interface {
+	// Connected is called when a connection is fully established and the
+	// connection is ready to send messages.
 	Connected()
+
+	// Disconnected is called when an active connection ends, potentially due
+	// to an error. It will also be called when establishing a connection
+	// fails, before it was fully Connected.
 	Disconnected(err error)
+
+	// Message is called for every incoming message. Note that it can be called
+	// before Connected or after Disconnected are called.
 	Message(*irc.Message)
 }
 
@@ -88,11 +96,10 @@ func (i *IRCon) establish() chan struct{} {
 	if server == "" {
 		server = DefaultServer
 	}
-	log.Println("Establishing connection to", server)
 	con := irc.New(i.ctx)
 	msgs, err := con.Connect(server)
 	if err != nil {
-		log.Println("Failed to connect to", server, "->", err)
+		i.Handler.Disconnected(err)
 		return nil
 	}
 	passwd := i.passwd

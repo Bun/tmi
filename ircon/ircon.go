@@ -54,11 +54,21 @@ type IRCon struct {
 
 // New creates a new IRCon with the given credentials.
 func New(nick, passwd string) *IRCon {
+	if nick == "" {
+		// Default anonymous login; cannot send messages(!)
+		nick = "justinfan12345"
+		passwd = "blah"
+	}
 	return &IRCon{
 		Caps:   DefaultCaps,
 		nick:   nick,
 		passwd: passwd,
 	}
+}
+
+// Nick returns the username or anonymous nickname used for this connection.
+func (i *IRCon) Nick() string {
+	return i.nick
 }
 
 // Background runs the connection in a background goroutine until ctx is done.
@@ -104,11 +114,6 @@ func (i *IRCon) establish() chan struct{} {
 	}
 	passwd := i.passwd
 	nick := i.nick
-	if nick == "" {
-		// Anonymous login; cannot send messages(!)
-		nick = "justinfan12345"
-		passwd = "blah"
-	}
 	if i.Caps != "" {
 		con.Send("CAP REQ :" + i.Caps)
 	}

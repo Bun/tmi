@@ -25,6 +25,7 @@ type IRC struct {
 	lock    sync.Mutex
 	err     error
 
+	Dialer   *websocket.Dialer
 	Messages chan *Message // recv
 	Outgoing chan string   // send
 }
@@ -41,7 +42,11 @@ func New(ctx context.Context) *IRC {
 func (irc *IRC) Connect(address string) (chan *Message, error) {
 	irc.address = address
 
-	c, _, err := websocket.DefaultDialer.Dial(address, nil)
+	dialer := irc.Dialer
+	if dialer == nil {
+		dialer = websocket.DefaultDialer
+	}
+	c, _, err := dialer.Dial(address, nil)
 	if err != nil {
 		return nil, err
 	}

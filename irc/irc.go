@@ -14,7 +14,9 @@ import (
 // deadline is used to set a maximum read/write timeout. This shouldn't be
 // violated on a working connection, due to in-protocol PING/PONG and normal
 // activity.
-const deadline = 5 * 60 * time.Second
+//
+// The PING interval appears to be around 4 to 5 minutes.
+const deadline = 6 * 60 * time.Second
 
 // IRC is an IRC connection.
 type IRC struct {

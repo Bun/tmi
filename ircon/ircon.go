@@ -78,6 +78,7 @@ func (i *IRCon) Background(ctx context.Context) {
 }
 
 func (i *IRCon) loop() {
+	cd := newBackoff(15, 300)
 	delay := time.After(0)
 	for {
 		i.mu.Lock()
@@ -88,8 +89,9 @@ func (i *IRCon) loop() {
 			return
 		case <-delay:
 		}
-		delay = time.After(time.Second * 30)
+		cd.Now()
 		wait := i.establish()
+		// Wait until connection is lost
 		if wait != nil {
 			select {
 			case <-i.ctx.Done():
@@ -98,6 +100,7 @@ func (i *IRCon) loop() {
 			case <-wait:
 			}
 		}
+		delay = time.After(cd.Delay())
 	}
 }
 

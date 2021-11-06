@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"bnsvc.net/tmi/irc"
+	"raccatta.cc/tmi/irc"
 )
 
 // DefaultServer is the default Twitch "IRC" server used by e.g. web chat
@@ -45,7 +45,6 @@ type IRCon struct {
 	server       string
 	nick, passwd string
 
-	ctx context.Context
 	con *irc.IRC
 	mu  sync.Mutex
 
@@ -73,11 +72,15 @@ func (i *IRCon) Nick() string {
 
 // Background runs the connection in a background goroutine until ctx is done.
 func (i *IRCon) Background(ctx context.Context) {
-	i.ctx = ctx
-	go i.loop()
+	go i.loop(ctx, i.Handler)
 }
 
-func (i *IRCon) loop() {
+func (i *IRCon) Run(ctx context.Context, h Handler) {
+	i.Handler = h
+	i.loop(ctx, h)
+}
+
+func (i *IRCon) loop(ctx context.Context, h Handler) {
 	cd := newBackoff(15, 300)
 	delay := time.After(0)
 	for {
@@ -85,16 +88,16 @@ func (i *IRCon) loop() {
 		i.con = nil
 		i.mu.Unlock()
 		select {
-		case <-i.ctx.Done():
+		case <-ctx.Done():
 			return
 		case <-delay:
 		}
 		cd.Now()
-		wait := i.establish()
+		wait := i.establish(ctx, h)
 		// Wait until connection is lost
 		if wait != nil {
 			select {
-			case <-i.ctx.Done():
+			case <-ctx.Done():
 				i.con.Close()
 				return
 			case <-wait:
@@ -104,15 +107,15 @@ func (i *IRCon) loop() {
 	}
 }
 
-func (i *IRCon) establish() chan struct{} {
+func (i *IRCon) establish(ctx context.Context, h Handler) chan struct{} {
 	server := i.server
 	if server == "" {
 		server = DefaultServer
 	}
-	con := irc.New(i.ctx)
+	con := irc.New(ctx)
 	msgs, err := con.Connect(server)
 	if err != nil {
-		i.Handler.Disconnected(err)
+		h.Disconnected(err)
 		return nil
 	}
 	passwd := i.passwd
@@ -127,19 +130,19 @@ func (i *IRCon) establish() chan struct{} {
 	i.mu.Lock()
 	i.con = con
 	i.mu.Unlock()
-	i.Handler.Connected()
+	h.Connected()
 	go func() {
 		defer func() {
-			i.Handler.Disconnected(con.Err()) // TODO: validate order of events
+			h.Disconnected(con.Err()) // TODO: validate order of events
 		}()
 		defer close(wait)
 		defer con.Close()
-		i.dispatch(con, msgs)
+		i.dispatch(con, h, msgs)
 	}()
 	return wait
 }
 
-func (i *IRCon) dispatch(con *irc.IRC, msgs chan *irc.Message) {
+func (i *IRCon) dispatch(con *irc.IRC, h Handler, msgs chan *irc.Message) {
 	for msg := range msgs {
 		switch msg.Command {
 		case "PING":
@@ -147,7 +150,7 @@ func (i *IRCon) dispatch(con *irc.IRC, msgs chan *irc.Message) {
 		}
 		// Call should not block
 		// Call should implement error handling
-		i.Handler.Message(msg)
+		h.Message(msg)
 	}
 }
 

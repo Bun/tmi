@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"bnsvc.net/tmi/ircon"
+	"raccatta.cc/tmi/ircon"
 )
 
 type handler struct {

@@ -1,4 +1,4 @@
-module bnsvc.net/tmi
+module raccatta.cc/tmi
 
 go 1.15
 

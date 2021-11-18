@@ -8,6 +8,7 @@ type IRCHandshake struct {
 	Caps string
 
 	Nick   string
+	Ident  string
 	GECOS  string
 	Passwd string
 }
@@ -22,6 +23,7 @@ func TwitchHandshaker(nick, passwd string) IRCHandshake {
 	return IRCHandshake{
 		Caps:   DefaultCaps,
 		Nick:   nick,
+		Ident:  nick,
 		Passwd: passwd,
 		GECOS:  nick,
 	}
@@ -41,7 +43,7 @@ func (irc IRCHandshake) Handshake(con Sender) error {
 	if err := con.Send("NICK " + irc.Nick); err != nil {
 		return err
 	}
-	if err := con.Send("USER " + irc.Nick + " 8 * :" + irc.GECOS); err != nil {
+	if err := con.Send("USER " + irc.Ident + " 8 * :" + irc.GECOS); err != nil {
 		return err
 	}
 	return nil

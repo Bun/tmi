@@ -17,7 +17,7 @@ type Message struct {
 
 // Trailer returns the argument at position i, even if it is not strictly the
 // final argument.
-func (m Message) Trailer(i int) string {
+func (m *Message) Trailer(i int) string {
 	if l := len(m.Args); l == (i + 1) {
 		return m.Args[i]
 	} else if l >= i {
@@ -28,14 +28,14 @@ func (m Message) Trailer(i int) string {
 }
 
 // Arg returns the given argument, even if it is not set.
-func (m Message) Arg(i int) string {
+func (m *Message) Arg(i int) string {
 	if i < len(m.Args) {
 		return m.Args[i]
 	}
 	return ""
 }
 
-func (m Message) Raw() string {
+func (m *Message) Raw() string {
 	return m.raw
 }
 

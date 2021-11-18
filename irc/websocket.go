@@ -13,6 +13,8 @@ type websocketTransport struct {
 }
 
 func (wt websocketTransport) Dial(ctx context.Context) (Conn, error) {
+	ctx, cancel := context.WithTimeout(ctx, time.Second*30)
+	defer cancel()
 	c, _, err := wt.dialer.DialContext(ctx, wt.addr, nil)
 	if err != nil {
 		return nil, err
@@ -52,12 +54,7 @@ func (wc *websocketConn) Close() error {
 }
 
 func (wc *websocketConn) Send(message string) error {
-	buf := []byte(message + "\r\n")
-	for i, c := range buf[:len(buf)-2] {
-		if c == '\r' || c == '\n' || c == 0 {
-			buf[i] = ' '
-		}
-	}
+	buf := safeMessage(message)
 	wc.conn.SetWriteDeadline(time.Now().Add(deadline))
 	return wc.conn.WriteMessage(websocket.TextMessage, buf)
 }

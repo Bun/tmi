@@ -3,20 +3,41 @@ package irc
 import (
 	"context"
 	"crypto/tls"
+	"time"
 )
+
+type TLSOpt interface {
+	apply(*tlsTransport)
+}
+
+// TLSConfig is a TLSOpt for specifying a tls.Config.
+type TLSConfig struct{ *tls.Config }
+
+func (cfg TLSConfig) apply(t *tlsTransport) {
+	t.config = cfg.Config
+}
+
+// NewTLS is an extended initializer for TLS-based IRC.
+func NewTLS(addr string, options ...TLSOpt) Dialer {
+	transport := tlsTransport{
+		addr: defaultPort(addr, "6697"),
+	}
+	for _, opt := range options {
+		opt.apply(&transport)
+	}
+	return transport
+}
 
 type tlsTransport struct {
 	addr   string
 	dialer *tls.Dialer
-	certs  []tls.Certificate
+	config *tls.Config
 }
 
 func (wt tlsTransport) Dial(ctx context.Context) (Conn, error) {
-	config := &tls.Config{
-		//ServerName: snParts[0],
-		Certificates: wt.certs,
-	}
-
+	ctx, cancel := context.WithTimeout(ctx, time.Second*30)
+	defer cancel()
+	config := wt.config
 	nc, err := (&tls.Dialer{
 		Config: config,
 	}).DialContext(ctx, "tcp", wt.addr)

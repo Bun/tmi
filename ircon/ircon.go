@@ -61,14 +61,16 @@ type IRCon struct {
 	// Server allows connecting to a different TMI server.
 	Server string
 
+	dialer     irc.Dialer
 	handshaker Handshaker
 	con        *conn
 	mu         sync.Mutex
 }
 
 // New creates a new IRCon with the given credentials.
-func New(h Handshaker) *IRCon {
+func New(d irc.Dialer, h Handshaker) *IRCon {
 	return &IRCon{
+		dialer:     d,
 		handshaker: h,
 	}
 }
@@ -101,13 +103,8 @@ func (i *IRCon) session(ctx context.Context, h Handler) {
 	if server == "" {
 		server = DefaultServer
 	}
-	factory, err := irc.New(ctx, server)
-	if err != nil {
-		h.Disconnected(err)
-		return
-	}
 
-	con, err := factory.Connect()
+	con, err := i.dialer.Dial(ctx)
 	if err != nil {
 		h.Disconnected(err)
 		return

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"raccatta.cc/tmi/irc"
 	"raccatta.cc/tmi/ircon"
 )
 
@@ -51,10 +52,16 @@ func main() {
 
 	if server == "irc" {
 		server = ircon.DefaultIRCServer
+	} else if server == "" {
+		server = ircon.DefaultServer
 	}
 
-	ctx := context.Background()
-	con := ircon.New(ircon.TwitchHandshaker(nick, passwd))
+	dialer, err := irc.New(server)
+	if err != nil {
+		panic(err)
+	}
+
+	con := ircon.New(dialer, ircon.TwitchHandshaker(nick, passwd))
 	con.Server = server
 	h := &handler{
 		Con: con,
@@ -66,6 +73,8 @@ func main() {
 		}
 		h.Channels = chans
 	}
+
+	ctx, cancel := context.WithCancel(context.Background())
 	go con.Run(ctx, h)
 
 	raw := func(w http.ResponseWriter, r *http.Request) {
@@ -82,6 +91,9 @@ func main() {
 
 	go func() {
 		mux := http.NewServeMux()
+		mux.HandleFunc("/cancel", func(w http.ResponseWriter, r *http.Request) {
+			cancel()
+		})
 		mux.HandleFunc("/raw", raw)
 		s := &http.Server{
 			Addr:           "localhost:2048",

@@ -39,12 +39,7 @@ func (wc *netConn) Close() error {
 }
 
 func (wc *netConn) Send(message string) error {
-	buf := []byte(message + "\r\n")
-	for i, c := range buf[:len(buf)-2] {
-		if c == '\r' || c == '\n' || c == 0 {
-			buf[i] = ' '
-		}
-	}
+	buf := safeMessage(message)
 	wc.conn.SetWriteDeadline(time.Now().Add(deadline))
 	_, err := wc.conn.Write(buf)
 	return err

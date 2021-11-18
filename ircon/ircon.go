@@ -19,7 +19,7 @@ const (
 	DefaultWebChat = "wss://irc-ws.chat.twitch.tv/"
 
 	// DefaultServer is the default server.
-	DefaultServer = DefaultWebChat
+	DefaultServer = DefaultIRCServer
 )
 
 type (

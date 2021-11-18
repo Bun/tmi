@@ -40,16 +40,22 @@ func (handler) Disconnected(err error) {
 }
 
 func (handler) Message(msg *ircon.Message) {
-	fmt.Println(msg.Raw())
+	fmt.Println("MSG:", msg.Raw())
 }
 
 func main() {
 	nick := os.Getenv("NICK")     // Your username
 	passwd := os.Getenv("PASSWD") // OAuth token in the form oauth:...
 	channel := os.Getenv("CHAN")
+	server := os.Getenv("SERVER")
+
+	if server == "irc" {
+		server = ircon.DefaultIRCServer
+	}
 
 	ctx := context.Background()
-	con := ircon.New(nick, passwd)
+	con := ircon.New(ircon.TwitchHandshaker(nick, passwd))
+	con.Server = server
 	h := &handler{
 		Con: con,
 	}
@@ -60,8 +66,7 @@ func main() {
 		}
 		h.Channels = chans
 	}
-	con.Handler = h
-	con.Background(ctx)
+	go con.Run(ctx, h)
 
 	raw := func(w http.ResponseWriter, r *http.Request) {
 		var req struct {

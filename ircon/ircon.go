@@ -3,14 +3,34 @@ package ircon
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"sync"
 	"time"
 
 	"raccatta.cc/tmi/irc"
 )
 
-// DefaultServer is the default Twitch "IRC" server used by e.g. web chat
-const DefaultServer = "wss://irc-ws.chat.twitch.tv/"
+const (
+	// DefaultIRCServer is the default Twitch IRC server
+	DefaultIRCServer = "ircs://irc.chat.twitch.tv:6697/"
+
+	// DefaultWebChat is the default Twitch "IRC" server used by e.g. web chat
+	DefaultWebChat = "wss://irc-ws.chat.twitch.tv/"
+
+	// DefaultServer is the default server.
+	DefaultServer = DefaultWebChat
+)
+
+type (
+	// Sender abstraction for Handshaker
+	Sender interface {
+		Send(msg string) error
+	}
+	Handshaker interface {
+		Handshake(s Sender) error
+	}
+)
 
 // DefaultCaps is the default set of capabilities. The twitch.tv/membership
 // capability is omitted for performance reasons and its general lack of
@@ -38,45 +58,23 @@ type Handler interface {
 
 // An IRCon is an automatically reconnecting IRC connection.
 type IRCon struct {
-	// Caps contains the set of capabilities that are requested on connect.
-	// Advanced users can specify their own set.
-	Caps string
+	// Server allows connecting to a different TMI server.
+	Server string
 
-	server       string
-	nick, passwd string
-
-	con *irc.IRC
-	mu  sync.Mutex
-
-	Handler Handler
+	handshaker Handshaker
+	con        *conn
+	mu         sync.Mutex
 }
 
 // New creates a new IRCon with the given credentials.
-func New(nick, passwd string) *IRCon {
-	if nick == "" {
-		// Default anonymous login; cannot send messages(!)
-		nick = "justinfan12345"
-		passwd = "blah"
-	}
+func New(h Handshaker) *IRCon {
 	return &IRCon{
-		Caps:   DefaultCaps,
-		nick:   nick,
-		passwd: passwd,
+		handshaker: h,
 	}
 }
 
-// Nick returns the username or anonymous nickname used for this connection.
-func (i *IRCon) Nick() string {
-	return i.nick
-}
-
-// Background runs the connection in a background goroutine until ctx is done.
-func (i *IRCon) Background(ctx context.Context) {
-	go i.loop(ctx, i.Handler)
-}
-
+// Run maintains a connection to the IRC server until the context is done.
 func (i *IRCon) Run(ctx context.Context, h Handler) {
-	i.Handler = h
 	i.loop(ctx, h)
 }
 
@@ -93,73 +91,90 @@ func (i *IRCon) loop(ctx context.Context, h Handler) {
 		case <-delay:
 		}
 		cd.Now()
-		wait := i.establish(ctx, h)
-		// Wait until connection is lost
-		if wait != nil {
-			select {
-			case <-ctx.Done():
-				i.con.Close()
-				return
-			case <-wait:
-			}
-		}
+		i.session(ctx, h)
 		delay = time.After(cd.Delay())
 	}
 }
 
-func (i *IRCon) establish(ctx context.Context, h Handler) chan struct{} {
-	server := i.server
+func (i *IRCon) session(ctx context.Context, h Handler) {
+	server := i.Server
 	if server == "" {
 		server = DefaultServer
 	}
-	con := irc.New(ctx)
-	msgs, err := con.Connect(server)
+	factory, err := irc.New(ctx, server)
 	if err != nil {
 		h.Disconnected(err)
-		return nil
+		return
 	}
-	passwd := i.passwd
-	nick := i.nick
-	if i.Caps != "" {
-		con.Send("CAP REQ :" + i.Caps)
+
+	con, err := factory.Connect()
+	if err != nil {
+		h.Disconnected(err)
+		return
 	}
-	con.Send("PASS " + passwd)
-	con.Send("NICK " + nick)
-	con.Send("USER " + nick + " 8 * :" + nick)
-	wait := make(chan struct{})
+	c := &conn{
+		Conn: con,
+		h:    h,
+	}
 	i.mu.Lock()
-	i.con = con
+	i.con = c
 	i.mu.Unlock()
-	h.Connected()
+	wait := make(chan struct{})
 	go func() {
-		defer func() {
-			h.Disconnected(con.Err()) // TODO: validate order of events
-		}()
 		defer close(wait)
 		defer con.Close()
-		i.dispatch(con, h, msgs)
-	}()
-	return wait
-}
+		for {
+			msg, err := con.Read()
+			if err != nil {
+				c.closeWithErr(fmt.Errorf("Read failed: %w", err))
+				return
+			}
 
-func (i *IRCon) dispatch(con *irc.IRC, h Handler, msgs chan *irc.Message) {
-	for msg := range msgs {
-		switch msg.Command {
-		case "PING":
-			con.Send("PONG :" + msg.Trailer(0))
+			if msg.Command == "PING" {
+				con.Send("PONG :" + msg.Trailer(0))
+			}
+
+			// Call should not block
+			// Call should implement error handling
+			h.Message(msg)
 		}
-		// Call should not block
-		// Call should implement error handling
-		h.Message(msg)
+	}()
+	if err := i.handshaker.Handshake(con); err == nil {
+		h.Connected()
 	}
+	<-wait
 }
 
 // Send sends a message to the currently active IRC connection. If there is no
 // active connection, the message is lost.
-func (i *IRCon) Send(s string) {
+//
+// TODO: typically we want to associate message sending with a specific
+// connection instance, and not confuse it during reconnects.
+// TODO: make a variant that can wait for a succesful connection.
+func (i *IRCon) Send(s string) error {
 	i.mu.Lock()
 	defer i.mu.Unlock()
-	if i.con != nil {
-		i.con.Send(s)
+	if i.con == nil {
+		return ErrNotConnected
 	}
+	err := i.con.Send(s)
+	if err != nil {
+		i.con.closeWithErr(fmt.Errorf("Send failed: %w", err))
+	}
+	return err
+}
+
+var ErrNotConnected = errors.New("Not connected")
+
+type conn struct {
+	irc.Conn
+	disconnected sync.Once
+	h            Handler
+}
+
+func (c *conn) closeWithErr(err error) {
+	c.disconnected.Do(func() {
+		c.h.Disconnected(err)
+	})
+	c.Close()
 }

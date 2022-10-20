@@ -42,21 +42,14 @@ func (m *Message) Raw() string {
 var unescapeTag = strings.NewReplacer("\\:", ";", "\\s", " ", "\\r", "\r", "\\n", "\n", "\\\\", "\\")
 
 func parseTags(s string) map[string]string {
-	tags := strings.Split(s, ";")
 	t := make(map[string]string)
-
-	for _, tag := range tags {
-		split := strings.IndexByte(tag, '=')
-		if split < 0 {
-			t[tag] = ""
+	iter := strIter{s: s, b: ';'}
+	for iter.Next() {
+		key, value := splitb(iter.v, '=')
+		if strings.IndexByte(value, '\\') > -1 {
+			t[key] = unescapeTag.Replace(value)
 		} else {
-			key := tag[:split]
-			value := tag[split+1:]
-			if strings.Contains(value, "\\") {
-				t[key] = unescapeTag.Replace(value)
-			} else {
-				t[key] = value
-			}
+			t[key] = value
 		}
 	}
 
@@ -74,37 +67,56 @@ func ParseMessage(line string) *Message {
 	m := &Message{raw: line}
 
 	if strings.HasPrefix(line, "@") {
-		detag := strings.SplitN(line, " ", 2)
-		m.Tags = parseTags(detag[0][1:])
-		if len(detag) > 1 {
-			line = detag[1]
-		} else {
-			line = ""
-		}
+		var tags string
+		tags, line = splitb(line, ' ')
+		m.Tags = parseTags(tags[1:])
 	}
 
-	parts := strings.SplitN(line, " :", 2)
+	if strings.HasPrefix(line, ":") {
+		var source string
+		source, line = splitb(line, ' ')
+		m.Source = source[1:]
+	}
+
+	// Payload is just a "special" form of the last argument
 	var payload string
-	p := false
+	line, payload, m.HasTrailer = split(line, " :")
 
-	if len(parts) > 1 {
-		// XXX payload is just a "special" form of the last argument
-		p = true
-		m.HasTrailer = true
-		payload = parts[1]
-	}
-
-	parts = strings.Split(parts[0], " ")
-
-	if len(parts[0]) > 0 && parts[0][0] == ':' {
-		m.Source = parts[0][1:]
-		parts = parts[1:]
-	}
-
-	m.Command = parts[0]
-	m.Args = parts[1:]
-	if p {
+	args := strings.Split(line, " ")
+	m.Command = args[0]
+	m.Args = args[1:]
+	if m.HasTrailer {
 		m.Args = append(m.Args, payload)
 	}
 	return m
+}
+
+func splitb(s string, b byte) (string, string) {
+	c := strings.IndexByte(s, b)
+	if c == -1 {
+		return s, ""
+	}
+	return s[:c], s[c+1:]
+}
+
+func split(s, f string) (string, string, bool) {
+	c := strings.Index(s, f)
+	if c == -1 {
+		return s, "", false
+	}
+	return s[:c], s[c+len(f):], true
+}
+
+type strIter struct {
+	s string
+	b byte
+	v string
+}
+
+func (i *strIter) Next() bool {
+	if i.s == "" {
+		return false
+	}
+	i.v, i.s = splitb(i.s, i.b)
+	return true
 }
